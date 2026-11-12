@@ -40,6 +40,34 @@ it('preserves background and font inside group status and relays it', async () =
 	expect(inner?.extendedTextMessage?.font).toBe(3)
 })
 
+it('uses the same message secret on the wrapper and wrapped content', async () => {
+	let relayed: proto.IMessage | undefined
+	let relayedJid: string | undefined
+	let relayMessageId: string | undefined
+	const jid = '123456789@g.us'
+	const result = await sendGroupStatus(
+		jid,
+		{ text: 'Secret wrapper test' },
+		{
+			waUploadToServer: upload,
+			userJid: '254700000000@s.whatsapp.net',
+			relayMessage: async (targetJid, message, options) => {
+				relayedJid = targetJid
+				relayed = message
+				relayMessageId = options.messageId
+			}
+		}
+	)
+
+	const outerSecret = relayed?.messageContextInfo?.messageSecret
+	const innerSecret = relayed?.groupStatusMessageV2?.message?.messageContextInfo?.messageSecret
+	expect(outerSecret).toHaveLength(32)
+	expect(Buffer.from(outerSecret!).equals(Buffer.from(innerSecret!))).toBe(true)
+	expect(relayedJid).toBe(jid)
+	expect(relayMessageId).toBe(result.key.id)
+	expect(result.message).toBe(relayed)
+})
+
 it('keeps existing group status calls without options working', async () => {
 	const result = await sendGroupStatus(
 		'123456789@g.us',

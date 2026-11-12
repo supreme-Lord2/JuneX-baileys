@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { proto } from '../../WAProto/index.js'
-import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage } from '../Types/index.js'
-import type { WAMediaUploadFunction } from '../Types/Message.js'
+import type { AnyMessageContent, WAMessage } from '../Types/index.js'
+import type { MediaGenerationOptions, WAMediaUploadFunction } from '../Types/Message.js'
 import { generateWAMessageContent, generateWAMessageFromContent } from '../Utils/messages'
 
 export type GroupStatusDeps = {
@@ -10,7 +10,7 @@ export type GroupStatusDeps = {
 	userJid?: string
 }
 
-export type GroupStatusOptions = Pick<MiscMessageGenerationOptions, 'backgroundColor' | 'font'>
+export type GroupStatusOptions = Pick<MediaGenerationOptions, 'backgroundColor' | 'font'>
 
 /**
  * Post a group-status update using WhatsApp's groupStatusMessageV2 wrapper.
@@ -28,8 +28,8 @@ export const sendGroupStatus = async (
 
 	// Build/upload the inner message exactly as a normal Baileys message.
 	const inner = await generateWAMessageContent(content, {
-		upload: waUploadToServer,
-		...options
+		...options,
+		upload: waUploadToServer
 	})
 	const messageSecret = crypto.randomBytes(32)
 
