@@ -85,6 +85,7 @@ import {
 	type JidWithDevice,
 	S_WHATSAPP_NET
 } from '../WABinary'
+import { decodeChannelStatus } from './channelStatus.js'
 import { extractGroupMetadata } from './groups'
 import { makeMessagesSocket } from './messages-send'
 
@@ -1998,6 +1999,21 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	// recv a message
 	ws.on('CB:message', async (node: BinaryNode) => {
 		await processNode('message', node, 'processing message', handleMessage)
+	})
+
+	// Channel statuses arrive as top-level <status> stanzas from @newsletter JIDs,
+	// not through the ordinary message stream.
+	ws.on('CB:status', (node: BinaryNode) => {
+		try {
+			const status = decodeChannelStatus(node)
+			if (status) {
+				ev.buffer()
+				ev.emit('newsletter.status', status)
+				ev.flush()
+			}
+		} catch (error) {
+			onUnexpectedError(error instanceof Error ? error : new Error(String(error)), 'handling channel status')
+		}
 	})
 
 	ws.on('CB:call', async (node: BinaryNode) => {

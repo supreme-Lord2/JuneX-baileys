@@ -183,6 +183,9 @@ The alias points to `junexbaileys@1.0.4`, while your application continues to us
 - [Broadcast Lists & Stories](#broadcast-lists--stories)
     - [Send Broadcast & Stories](#send-broadcast--stories)
     - [Experimental Group Status Media](#experimental-group-status-media)
+    - [Channel Statuses](#channel-statuses)
+    - [Send a Sticker Pack](#send-a-sticker-pack)
+    - [WhatsApp Usernames](#whatsapp-usernames)
     - [Query a Broadcast List's Recipients & Name](#query-a-broadcast-lists-recipients--name)
 - [Writing Custom Functionality](#writing-custom-functionality)
     - [Enabling Debug Level in Baileys Logs](#enabling-debug-level-in-baileys-logs)
@@ -1260,6 +1263,57 @@ await sock.sendGroupStatus(groupJid, {
 ```
 
 The group JID must end in `@g.us`. `sock.sendGroupStatus` builds the inner message with the normal JunexBaileys content generator, adds the required shared message secret, and relays it in a `groupStatusMessageV2` wrapper. For text statuses, pass `backgroundColor` (and optionally `font`) as the third argument so the color is encoded in the generated `extendedTextMessage`. It does not bypass group membership, WhatsApp privacy controls, or server-side restrictions, and may not be available in published Baileys packages.
+
+### Channel Statuses
+
+Channel statuses are temporary updates posted by channel admins. They are different from ordinary newsletter posts and personal `status@broadcast` stories. Posting requires the authenticated account to have permission to publish in the channel; server-side restrictions still apply.
+
+```ts
+const channelJid = '120363000000000000@newsletter'
+
+// Post a text status. Media content such as image or video is also supported.
+await sock.sendChannelStatus(channelJid, { text: 'A channel status update' }, {
+    backgroundColor: '#128C7E',
+    font: 0
+})
+
+// Receive statuses as they arrive, including offline backlog entries.
+sock.ev.on('newsletter.status', status => {
+    console.log(status.channelJid, status.text, status.messageTimestamp)
+})
+```
+
+### Send a Sticker Pack
+
+`sendStickerPack` uploads a ZIP of 1–60 WebP stickers plus a tray icon, then sends a pack message that recipients can add to their sticker collection.
+
+```ts
+await sock.sendStickerPack('254700000000@s.whatsapp.net', {
+    name: 'My Pack',
+    publisher: 'My App',
+    trayIcon: { url: './Media/tray.png' },
+    stickers: [
+        { data: { url: './Media/sticker-1.webp' }, emojis: ['😀'] },
+        { data: { url: './Media/sticker-2.webp' }, emojis: ['🎉'] }
+    ]
+})
+```
+
+### WhatsApp Usernames
+
+The socket includes methods to check or claim your username, retrieve or delete it, set a username PIN, look up a user by username, and fetch usernames for contacts. Availability depends on the account and WhatsApp server support.
+
+```ts
+const result = await sock.checkUsername('my_app_name')
+if (result.available) {
+    await sock.setUsername(result.username, { sessionId: result.session_id })
+}
+
+const myUsername = await sock.getMyUsername()
+const user = await sock.findUserByUsername('someone_name')
+```
+
+Username query identifiers are managed by WhatsApp and may rotate. If requests begin failing after a server-side change, use `sock.setUsernameQueryIds({ ... })` to update them at runtime.
 
 ### Query a Broadcast List's Recipients & Name
 ```ts

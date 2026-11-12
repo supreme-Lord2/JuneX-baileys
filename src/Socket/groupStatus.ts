@@ -1,8 +1,8 @@
 import crypto from 'crypto'
 import { proto } from '../../WAProto/index.js'
-import { generateWAMessageContent, generateWAMessageFromContent } from '../Utils/messages'
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage } from '../Types/index.js'
 import type { WAMediaUploadFunction } from '../Types/Message.js'
+import { generateWAMessageContent, generateWAMessageFromContent } from '../Utils/messages'
 
 export type GroupStatusDeps = {
 	relayMessage: (jid: string, message: proto.IMessage, opts: { messageId: string }) => Promise<unknown>

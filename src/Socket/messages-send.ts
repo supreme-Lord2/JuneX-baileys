@@ -12,6 +12,8 @@ import type {
 	WAMessage,
 	WAMessageKey
 } from '../Types'
+import type { StickerPack } from '../Types/StickerPack'
+import type { SetUsernameOptions, UsernameSource } from '../Types/Username'
 import {
 	aggregateMessageKeysNotFromMe,
 	assertMediaContent,
@@ -46,7 +48,6 @@ import {
 	shouldSendNewTcToken,
 	storeTcTokensFromIqResult
 } from '../Utils/tc-token-utils'
-import { sendGroupStatus } from './groupStatus.js'
 import {
 	areJidsSameUser,
 	type BinaryNode,
@@ -69,7 +70,26 @@ import {
 	S_WHATSAPP_NET
 } from '../WABinary'
 import { USyncQuery, USyncUser } from '../WAUSync'
+import { type ChannelStatusOptions, sendChannelStatus } from './channelStatus.js'
+import { sendGroupStatus } from './groupStatus.js'
 import { makeNewsletterSocket } from './newsletter'
+import { sendStickerPack } from './stickerPack.js'
+import {
+	checkUsername,
+	checkUsernameMulti,
+	deleteUsername,
+	fetchContactUsernames,
+	findUserByUsername,
+	getMyUsername,
+	getUsernameRecommendations,
+	setUsername,
+	setUsernamePin,
+	setUsernameQueryIds,
+	USERNAME_CHECK_RESULT,
+	USERNAME_QUERY_IDS,
+	USERNAME_SOURCE,
+	type UsernameQueryIds
+} from './username.js'
 
 export const makeMessagesSocket = (config: SocketConfig) => {
 	const {
@@ -90,6 +110,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		signalRepository,
 		upsertMessage,
 		query,
+		generateMessageTag,
 		fetchPrivacySettings,
 		sendNode,
 		groupMetadata,
@@ -1266,12 +1287,51 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		issuePrivacyTokens,
 		assertSessions,
 		relayMessage,
+		sendChannelStatus: (jid: string, content: AnyMessageContent, options: ChannelStatusOptions = {}) =>
+			sendChannelStatus(jid, content, { sendNode, waUploadToServer, userJid: authState.creds.me?.id }, options),
 		sendGroupStatus: (jid: string, content: AnyMessageContent, options = {}) =>
-			sendGroupStatus(jid, content, {
+			sendGroupStatus(
+				jid,
+				content,
+				{
+					relayMessage,
+					waUploadToServer,
+					userJid: authState.creds.me?.id
+				},
+				options
+			),
+		sendStickerPack: (jid: string, pack: StickerPack) =>
+			sendStickerPack(jid, pack, {
 				relayMessage,
-				waUploadToServer,
-				userJid: authState.creds.me?.id
-			}, options),
+				upload: waUploadToServer,
+				userJid: authState.creds.me?.id,
+				logger
+			}),
+		checkUsername: (username: string, includeSuggestions = true, sessionId?: string) =>
+			checkUsername(
+				username,
+				{ query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery },
+				includeSuggestions,
+				sessionId
+			),
+		checkUsernameMulti: (usernames: string[]) =>
+			checkUsernameMulti(usernames, { query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }),
+		setUsername: (username: string, options: SetUsernameOptions = {}) =>
+			setUsername(username, { query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }, options),
+		deleteUsername: () => deleteUsername({ query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }),
+		getMyUsername: () => getMyUsername({ query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }),
+		getUsernameRecommendations: (source: UsernameSource | null = null) =>
+			getUsernameRecommendations({ query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }, source),
+		setUsernamePin: (pin: string | null) =>
+			setUsernamePin(pin, { query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }),
+		findUserByUsername: (username: string, pin?: string) =>
+			findUserByUsername(username, { query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }, pin),
+		fetchContactUsernames: (...jids: string[]) =>
+			fetchContactUsernames(jids, { query, generateMessageTag, executeUSyncQuery: sock.executeUSyncQuery }),
+		setUsernameQueryIds: (ids: Partial<UsernameQueryIds>) => setUsernameQueryIds(ids),
+		USERNAME_QUERY_IDS,
+		USERNAME_CHECK_RESULT,
+		USERNAME_SOURCE,
 		sendReceipt,
 		sendReceipts,
 		readMessages,
@@ -1396,14 +1456,14 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 						attrs: {
 							polltype: 'creation'
 						}
-					} as BinaryNode)
+					})
 				} else if (isEventMsg) {
 					additionalNodes.push({
 						tag: 'meta',
 						attrs: {
 							event_type: 'creation'
 						}
-					} as BinaryNode)
+					})
 				}
 
 				await relayMessage(jid, fullMsg.message!, {
