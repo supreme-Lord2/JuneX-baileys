@@ -1079,7 +1079,11 @@ export const downloadMediaMessage = async <Type extends 'buffer' | 'stream'>(
 		let mediaType = contentType?.replace('Message', '') as MediaType
 		const media = mContent[contentType!]
 
-		if (!media || typeof media !== 'object' || (!('url' in media) && !('thumbnailDirectPath' in media))) {
+		if (
+			!media ||
+			typeof media !== 'object' ||
+			(!('url' in media) && !('directPath' in media) && !('thumbnailDirectPath' in media))
+		) {
 			throw new Boom(`"${contentType}" message is not a media message`)
 		}
 

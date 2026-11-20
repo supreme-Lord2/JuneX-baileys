@@ -4,8 +4,9 @@ import { Agent } from 'https'
 import * as os from 'os'
 import * as path from 'path'
 import { Readable } from 'stream'
-import type { MediaConnInfo, SocketConfig } from '../../Types'
+import type { MediaConnInfo, SocketConfig, WAMessage } from '../../Types'
 import type { ILogger } from '../../Utils/logger'
+import { downloadMediaMessage } from '../../Utils/messages'
 import { encryptedStream, getWAUploadToServer, type UploadParams, uploadWithNodeHttp } from '../../Utils/messages-media'
 
 const createTempFile = async (content: string): Promise<string> => {
@@ -365,6 +366,38 @@ describe('getWAUploadToServer', () => {
 			ts: undefined
 		})
 		expect((fetchInit as (RequestInit & { dispatcher?: unknown }) | undefined)?.dispatcher).toBeUndefined()
+	})
+})
+
+describe('downloadMediaMessage', () => {
+	it('accepts view-once media that has directPath but no url', async () => {
+		const originalFetch = globalThis.fetch
+		let requestedUrl: string | undefined
+		globalThis.fetch = (async input => {
+			requestedUrl = String(input)
+			return new Response(null, { status: 404 })
+		}) as typeof fetch
+
+		const message = {
+			key: { remoteJid: '12345@s.whatsapp.net', fromMe: false, id: 'view-once-direct-path' },
+			message: {
+				viewOnceMessageV2: {
+					message: {
+						imageMessage: {
+							directPath: '/media/view-once',
+							mediaKey: new Uint8Array(32)
+						}
+					}
+				}
+			}
+		} as unknown as WAMessage
+
+		try {
+			await expect(downloadMediaMessage(message, 'buffer', {})).rejects.toThrow('Failed to fetch stream')
+			expect(requestedUrl).toMatch(/^https:\/\/.+\/media\/view-once$/)
+		} finally {
+			globalThis.fetch = originalFetch
+		}
 	})
 })
 
