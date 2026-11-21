@@ -880,6 +880,57 @@ export const isViewOnceMessage = (content: WAMessageContent | null | undefined) 
 	return !!(wrapped?.imageMessage || wrapped?.videoMessage || wrapped?.ptvMessage || wrapped?.audioMessage)
 }
 
+/** Media kinds that can appear inside a view-once envelope. */
+export type ViewOnceMediaType = 'image' | 'video' | 'audio' | 'document' | 'ptv'
+
+export type ExtractedViewOnceMedia = {
+	media: DownloadableMessage & Record<string, any>
+	mediaType: ViewOnceMediaType
+	isViewOnce: boolean
+}
+
+const VIEW_ONCE_MEDIA: Record<string, ViewOnceMediaType> = {
+	imageMessage: 'image',
+	videoMessage: 'video',
+	audioMessage: 'audio',
+	documentMessage: 'document',
+	ptvMessage: 'ptv'
+}
+
+/** Unwrap disappearing/view-once wrappers and return media metadata, if present. */
+export const extractViewOnceMedia = (content: WAMessageContent | null | undefined): ExtractedViewOnceMedia | undefined => {
+	if (!content) {
+		return undefined
+	}
+
+	const seenWrapper = (node: WAMessageContent | null | undefined, depth = 0): boolean => {
+		if (!node || depth > 5) {
+			return false
+		}
+
+		if (node.viewOnceMessage?.message || node.viewOnceMessageV2?.message || node.viewOnceMessageV2Extension?.message) {
+			return true
+		}
+
+		return seenWrapper(node.ephemeralMessage?.message, depth + 1)
+	}
+
+	const wrapped = seenWrapper(content)
+	const inner = normalizeMessageContent(content)
+	if (!inner) {
+		return undefined
+	}
+
+	const innerType = getContentType(inner)
+	const mediaType = innerType && VIEW_ONCE_MEDIA[innerType]
+	if (!innerType || !mediaType) {
+		return undefined
+	}
+
+	const media = inner[innerType] as ExtractedViewOnceMedia['media']
+	return { media, mediaType, isViewOnce: wrapped || media?.viewOnce === true }
+}
+
 /**
  * Extract the true message content from a message
  * Eg. extracts the inner message from a disappearing message/view once message
@@ -1104,6 +1155,40 @@ type DownloadMediaMessageContext = {
 
 const REUPLOAD_REQUIRED_STATUS = [410, 404]
 
+const mediaLinkExpiry = (link: string) => {
+	let values: string[]
+	try {
+		values = new URL(link, 'https://mmg.whatsapp.net').searchParams.getAll('oe')
+	} catch {
+		return undefined
+	}
+
+	const [oe] = values
+	if (values.length !== 1 || !oe || !/^[0-9a-f]+$/i.test(oe)) {
+		return undefined
+	}
+
+	const expiry = parseInt(oe, 16) * 1000
+	return Number.isSafeInteger(expiry) ? expiry : undefined
+}
+
+const isExpiredLinkError = (error: unknown, message: WAMessage) => {
+	let link: unknown = (error as { data?: { url?: unknown } } | undefined)?.data?.url
+	if (typeof link !== 'string' && !(link instanceof URL)) {
+		const content = extractMessageContent(message.message)
+		const contentType = content ? getContentType(content) : undefined
+		const media = (contentType && content?.[contentType]) as { url?: string | null; directPath?: string | null } | undefined
+		link = media?.directPath || media?.url
+	}
+
+	if (!link) {
+		return false
+	}
+
+	const expiry = mediaLinkExpiry(link.toString())
+	return expiry !== undefined && expiry <= Date.now()
+}
+
 /**
  * Downloads the given message. Throws an error if it's not a media message
  */
@@ -1114,11 +1199,11 @@ export const downloadMediaMessage = async <Type extends 'buffer' | 'stream'>(
 	ctx?: DownloadMediaMessageContext
 ) => {
 	const result = await downloadMsg().catch(async error => {
-		if (
-			ctx &&
-			typeof error?.status === 'number' && // treat errors with status as HTTP failures requiring reupload
-			REUPLOAD_REQUIRED_STATUS.includes(error.status as number)
-		) {
+		const status = error?.output?.statusCode ?? error?.status
+		const shouldReupload =
+			typeof status === 'number' &&
+			(REUPLOAD_REQUIRED_STATUS.includes(status) || (status === 403 && isExpiredLinkError(error, message)))
+		if (ctx && shouldReupload) {
 			ctx.logger.info({ key: message.key }, 'sending reupload media request...')
 			// request reupload
 			message = await ctx.reuploadRequest(message)
@@ -1172,6 +1257,34 @@ export const downloadMediaMessage = async <Type extends 'buffer' | 'stream'>(
 
 		return stream
 	}
+}
+
+/** Download view-once media, requesting a fresh copy first if it has no URL. */
+export const downloadViewOnceMessage = async <Type extends 'buffer' | 'stream'>(
+	message: WAMessage,
+	type: Type,
+	options: MediaDownloadOptions,
+	ctx?: DownloadMediaMessageContext
+) => {
+	const extracted = extractViewOnceMedia(message.message)
+	if (!extracted?.isViewOnce) {
+		throw new Boom('message is not a view once media message', { statusCode: 400, data: message })
+	}
+
+	const { media } = extracted
+	if (!media.url && !media.directPath) {
+		if (!media.mediaKey || !ctx?.reuploadRequest) {
+			throw new Boom('view once media has no download URL; provide reuploadRequest to ask the sender to re-serve it', {
+				statusCode: 400,
+				data: message
+			})
+		}
+
+		ctx.logger.info({ key: message.key }, 'view once media has no URL, requesting re-upload...')
+		message = await ctx.reuploadRequest(message)
+	}
+
+	return downloadMediaMessage(message, type, options, ctx)
 }
 
 /** Checks whether the given message is a media message; if it is returns the inner content */
