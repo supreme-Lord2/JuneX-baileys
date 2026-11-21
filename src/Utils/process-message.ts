@@ -22,6 +22,7 @@ import { WAMessageStubType } from '../Types'
 import { getContentType, normalizeMessageContent } from '../Utils/messages'
 import {
 	areJidsSameUser,
+	type BinaryNode,
 	isHostedLidUser,
 	isHostedPnUser,
 	isJidBroadcast,
@@ -31,7 +32,7 @@ import {
 	jidEncode,
 	jidNormalizedUser
 } from '../WABinary'
-import { aesDecryptGCM, aesEncryptGCM, hmacSign } from './crypto'
+import { aesDecryptGCM, aesEncryptGCM, hmacSign, sha256 } from './crypto'
 import { getKeyAuthor, toNumber } from './generics'
 import { downloadAndProcessHistorySyncNotification } from './history'
 import type { ILogger } from './logger'
@@ -284,6 +285,35 @@ export function encryptPollVote(
 	const encIv = randomBytes(12)
 	const encPayload = aesEncryptGCM(plaintext, encKey, encIv, aad)
 	return { encPayload, encIv }
+}
+
+/**
+ * Build the raw option-hash nodes used by channel (newsletter) polls.
+ * Unlike group poll votes, newsletter votes are not AES-GCM encrypted.
+ */
+export function buildNewsletterPollVotes(optionNames: string[]): BinaryNode[] {
+	return optionNames.map(name => ({
+		tag: 'vote',
+		attrs: {},
+		content: sha256(Buffer.from(name))
+	}))
+}
+
+/**
+ * Select the voter identity used by group poll encryption. LID-addressed
+ * polls must use the account LID when available; other polls use its PN.
+ */
+export function getPollVoteVoterJid(
+	pollCreatorJid: string,
+	pollKey: Pick<WAMessageKey, 'participant' | 'addressingMode'>,
+	mePnJid: string,
+	meLidJid?: string
+): string {
+	const mePn = jidNormalizedUser(mePnJid)
+	const meLid = meLidJid ? jidNormalizedUser(meLidJid) : undefined
+	const pollUsesLid =
+		pollCreatorJid.endsWith('@lid') || pollKey.participant?.endsWith('@lid') || pollKey.addressingMode === 'lid'
+	return pollUsesLid && meLid ? meLid : mePn
 }
 
 /**

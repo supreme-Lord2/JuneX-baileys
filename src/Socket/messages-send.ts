@@ -26,15 +26,16 @@ import {
 	encodeSignedDeviceIdentity,
 	encodeWAMessage,
 	encryptMediaRetryRequest,
+	encryptPollVote,
 	extractDeviceJids,
 	generateMessageIDV2,
 	generateParticipantHashV2,
 	generateWAMessage,
 	getKeyAuthor,
+	getPollVoteVoterJid,
 	getStatusCodeForMediaRetry,
 	getUrlFromDirectPath,
 	getWAUploadToServer,
-	encryptPollVote,
 	isViewOnceMessage,
 	MessageRetryManager,
 	normalizeMessageContent,
@@ -75,9 +76,35 @@ import {
 	S_WHATSAPP_NET
 } from '../WABinary'
 import { USyncQuery, USyncUser } from '../WAUSync'
-import { type ChannelStatusOptions, sendChannelStatus } from './channelStatus.js'
+import { newsletterSendPollVote as sendNewsletterPollVote } from './channelPollVote.js'
+import {
+	cancelChannelPost,
+	type ChannelScheduleFetchOptions,
+	type ChannelScheduleOptions,
+	fetchChannelScheduledPosts,
+	rescheduleChannelPost,
+	scheduleChannelPost,
+	sendChannelPostNow
+} from './channelSchedule.js'
+import {
+	type ChannelStatusFetchOptions,
+	type ChannelStatusOptions,
+	type ChannelStatusResponsesOptions,
+	fetchChannelStatuses,
+	fetchChannelStatusResponses,
+	reactChannelStatus,
+	revokeChannelStatus,
+	sendChannelStatus,
+	sendChannelStatusViewReceipt
+} from './channelStatus.js'
 import { sendGroupStatus } from './groupStatus.js'
 import { makeNewsletterSocket } from './newsletter'
+import {
+	newsletterDirectoryList as listNewsletterDirectory,
+	type NewsletterDirectoryListOptions,
+	newsletterDirectorySearch as searchNewsletterDirectory,
+	type NewsletterDirectorySearchOptions
+} from './newsletterDirectory.js'
 import { sendStickerPack } from './stickerPack.js'
 import {
 	checkUsername,
@@ -1299,6 +1326,77 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		relayMessage,
 		sendChannelStatus: (jid: string, content: AnyMessageContent, options: ChannelStatusOptions = {}) =>
 			sendChannelStatus(jid, content, { sendNode, waUploadToServer, userJid: authState.creds.me?.id }, options),
+		newsletterReactStatus: (jid: string, serverId: string, reaction: string | null) =>
+			reactChannelStatus(jid, serverId, reaction, { query, generateMessageTag }),
+		newsletterRevokeStatus: (jid: string, statusId: string) =>
+			revokeChannelStatus(jid, statusId, { query, generateMessageTag }),
+		newsletterFetchStatus: (jid: string, options: ChannelStatusFetchOptions) =>
+			fetchChannelStatuses(jid, options, { query, generateMessageTag }),
+		newsletterFetchStatusResponses: (jid: string, serverId: string, options: ChannelStatusResponsesOptions) =>
+			fetchChannelStatusResponses(jid, serverId, options, { query, generateMessageTag }),
+		newsletterSendStatusViewReceipt: (jid: string, receiptStanzaId: string, sortId: number) =>
+			sendChannelStatusViewReceipt(jid, receiptStanzaId, sortId, { sendNode }),
+		newsletterScheduleChannelPost: (
+			jid: string,
+			content: AnyMessageContent,
+			publishAtMs: number,
+			options: ChannelScheduleOptions = {}
+		) =>
+			scheduleChannelPost(
+				jid,
+				content,
+				publishAtMs,
+				{ sendNode, waUploadToServer, userJid: authState.creds.me?.id },
+				options
+			),
+		newsletterRescheduleChannelPost: (
+			jid: string,
+			clientId: string,
+			content: AnyMessageContent,
+			publishAtMs: number,
+			options: ChannelScheduleOptions = {}
+		) =>
+			rescheduleChannelPost(
+				jid,
+				clientId,
+				content,
+				publishAtMs,
+				{
+					sendNode,
+					waUploadToServer,
+					userJid: authState.creds.me?.id,
+					query,
+					generateMessageTag
+				},
+				options
+			),
+		newsletterSendChannelPostNow: (
+			jid: string,
+			clientId: string,
+			content: AnyMessageContent,
+			options: ChannelScheduleOptions = {}
+		) =>
+			sendChannelPostNow(
+				jid,
+				clientId,
+				content,
+				{
+					sendNode,
+					waUploadToServer,
+					userJid: authState.creds.me?.id,
+					query,
+					generateMessageTag
+				},
+				options
+			),
+		newsletterCancelChannelPost: (jid: string, clientId: string) =>
+			cancelChannelPost(jid, clientId, { query, generateMessageTag }),
+		newsletterFetchChannelScheduledPosts: (jid: string, options: ChannelScheduleFetchOptions) =>
+			fetchChannelScheduledPosts(jid, options, { query, generateMessageTag }),
+		newsletterDirectorySearch: (searchText: string, options: NewsletterDirectorySearchOptions = {}) =>
+			searchNewsletterDirectory(searchText, options, { query, generateMessageTag }),
+		newsletterDirectoryList: (options: NewsletterDirectoryListOptions = {}) =>
+			listNewsletterDirectory(options, { query, generateMessageTag }),
 		sendGroupStatus: (jid: string, content: AnyMessageContent, options = {}) =>
 			sendGroupStatus(
 				jid,
@@ -1376,7 +1474,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 									const resultStr = proto.MediaRetryNotification.ResultType[media.result!]
 									throw new Boom(`Media re-upload failed by device (${resultStr})`, {
 										data: media,
-										statusCode: getStatusCodeForMediaRetry(media.result!) || 404
+									statusCode: getStatusCodeForMediaRetry(media.result!) || 404
 									})
 								}
 
@@ -1464,11 +1562,13 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				throw new Boom('sendPollVote needs at least one non-empty option', { statusCode: 400 })
 			}
 
-			const voterJid = jidNormalizedUser(assertMeId(authState.creds))
+			const mePnJid = jidNormalizedUser(assertMeId(authState.creds))
+			const pollCreatorJid = pollInfo.creatorJid || getKeyAuthor(pollCreationMessageKey, mePnJid)
+			const voterJid = getPollVoteVoterJid(pollCreatorJid, pollCreationMessageKey, mePnJid, authState.creds.me?.lid)
 			const vote = encryptPollVote(
 				{ selectedOptions: optionNames.map(name => sha256(Buffer.from(name))) },
 				{
-					pollCreatorJid: pollInfo.creatorJid || getKeyAuthor(pollCreationMessageKey, voterJid),
+					pollCreatorJid,
 					pollMsgId,
 					pollEncKey: pollInfo.messageSecret,
 					voterJid
@@ -1483,6 +1583,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				}
 			})
 		},
+		newsletterSendPollVote: (jid: string, parentServerId: string | number, options: string | string[]) =>
+			sendNewsletterPollVote(jid, parentServerId, options, { query, generateMessageTag }),
 		sendMessage: async (jid: string, content: AnyMessageContent, options: MiscMessageGenerationOptions = {}) => {
 			const userJid = authState.creds.me!.id
 			if (
