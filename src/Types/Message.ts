@@ -126,6 +126,13 @@ type ViewOnce = {
 	viewOnce?: boolean
 }
 
+type ViewOnceV2 = {
+	/** Send a view-once message using WhatsApp's V2 envelope. */
+	viewOnceV2?: boolean
+	/** Use the V2 envelope variant that supports voice notes. */
+	viewOnceV2Extension?: boolean
+}
+
 type Editable = {
 	edit?: WAMessageKey
 }
@@ -137,10 +144,26 @@ type WithDimensions = {
 export type PollMessageOptions = {
 	name: string
 	selectableCount?: number
+	/** Alias matching the protobuf field name; takes precedence over selectableCount. */
+	selectableOptionsCount?: number
 	values: string[]
 	/** 32 byte message secret to encrypt poll selections */
 	messageSecret?: Uint8Array
 	toAnnouncementGroup?: boolean
+	/** Regular poll or quiz; defaults to POLL. */
+	pollType?: proto.Message.PollType
+	/** Correct option for quiz polls; must occur in values. */
+	correctAnswer?: string
+	/** Unix seconds when the poll closes. */
+	endTime?: number
+	hideParticipantName?: boolean
+	allowAddOption?: boolean
+}
+
+/** Add one option to an existing poll. */
+export type PollAddOptionOptions = {
+	pollCreationMessageKey: WAMessageKey
+	option: string
 }
 
 export type EventMessageOptions = {
@@ -284,7 +307,8 @@ export type AnyRegularMessageContent = (
 	| SharePhoneNumber
 	| RequestPhoneNumber
 ) &
-	ViewOnce
+	ViewOnce &
+	ViewOnceV2
 
 export type AnyMessageContent =
 	| AnyRegularMessageContent
@@ -302,6 +326,9 @@ export type AnyMessageContent =
 	| {
 			limitSharing: boolean
 	  }
+	| { pollAddOption: PollAddOptionOptions }
+	| { pollAddOptionMessage: proto.Message.IPollAddOptionMessage }
+	| { pollUpdateMessage: proto.Message.IPollUpdateMessage }
 
 export type GroupMetadataParticipants = Pick<GroupMetadata, 'participants'>
 

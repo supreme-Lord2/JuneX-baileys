@@ -5276,6 +5276,7 @@ export namespace proto {
         statusQuotedMessage?: (proto.Message.IStatusQuotedMessage|null);
         statusStickerInteractionMessage?: (proto.Message.IStatusStickerInteractionMessage|null);
         pollCreationMessageV5?: (proto.Message.IPollCreationMessage|null);
+        pollAddOptionMessage?: (proto.Message.IPollAddOptionMessage|null);
         newsletterFollowerInviteMessageV2?: (proto.Message.INewsletterFollowerInviteMessage|null);
         pollResultSnapshotMessageV3?: (proto.Message.IPollResultSnapshotMessage|null);
     }
@@ -5375,6 +5376,7 @@ export namespace proto {
         public statusQuotedMessage?: (proto.Message.IStatusQuotedMessage|null);
         public statusStickerInteractionMessage?: (proto.Message.IStatusStickerInteractionMessage|null);
         public pollCreationMessageV5?: (proto.Message.IPollCreationMessage|null);
+        public pollAddOptionMessage?: (proto.Message.IPollAddOptionMessage|null);
         public newsletterFollowerInviteMessageV2?: (proto.Message.INewsletterFollowerInviteMessage|null);
         public pollResultSnapshotMessageV3?: (proto.Message.IPollResultSnapshotMessage|null);
         public static create(properties?: proto.IMessage): proto.Message;
@@ -8306,6 +8308,9 @@ export namespace proto {
             pollContentType?: (proto.Message.PollContentType|null);
             pollType?: (proto.Message.PollType|null);
             correctAnswer?: (proto.Message.PollCreationMessage.IOption|null);
+            endTime?: (number|Long|null);
+            hideParticipantName?: (boolean|null);
+            allowAddOption?: (boolean|null);
         }
 
         class PollCreationMessage implements IPollCreationMessage {
@@ -8318,6 +8323,9 @@ export namespace proto {
             public pollContentType?: (proto.Message.PollContentType|null);
             public pollType?: (proto.Message.PollType|null);
             public correctAnswer?: (proto.Message.PollCreationMessage.IOption|null);
+            public endTime?: (number|Long|null);
+            public hideParticipantName?: (boolean|null);
+            public allowAddOption?: (boolean|null);
             public static create(properties?: proto.Message.IPollCreationMessage): proto.Message.PollCreationMessage;
             public static encode(m: proto.Message.IPollCreationMessage, w?: $protobuf.Writer): $protobuf.Writer;
             public static decode(r: ($protobuf.Reader|Uint8Array), l?: number): proto.Message.PollCreationMessage;
@@ -8432,6 +8440,24 @@ export namespace proto {
             public static decode(r: ($protobuf.Reader|Uint8Array), l?: number): proto.Message.PollUpdateMessage;
             public static fromObject(d: { [k: string]: any }): proto.Message.PollUpdateMessage;
             public static toObject(m: proto.Message.PollUpdateMessage, o?: $protobuf.IConversionOptions): { [k: string]: any };
+            public toJSON(): { [k: string]: any };
+            public static getTypeUrl(typeUrlPrefix?: string): string;
+        }
+
+        interface IPollAddOptionMessage {
+            pollCreationMessageKey?: (proto.IMessageKey|null);
+            addOption?: (proto.Message.PollCreationMessage.IOption|null);
+        }
+
+        class PollAddOptionMessage implements IPollAddOptionMessage {
+            constructor(p?: proto.Message.IPollAddOptionMessage);
+            public pollCreationMessageKey?: (proto.IMessageKey|null);
+            public addOption?: (proto.Message.PollCreationMessage.IOption|null);
+            public static create(properties?: proto.Message.IPollAddOptionMessage): proto.Message.PollAddOptionMessage;
+            public static encode(m: proto.Message.IPollAddOptionMessage, w?: $protobuf.Writer): $protobuf.Writer;
+            public static decode(r: ($protobuf.Reader|Uint8Array), l?: number): proto.Message.PollAddOptionMessage;
+            public static fromObject(d: { [k: string]: any }): proto.Message.PollAddOptionMessage;
+            public static toObject(m: proto.Message.PollAddOptionMessage, o?: $protobuf.IConversionOptions): { [k: string]: any };
             public toJSON(): { [k: string]: any };
             public static getTypeUrl(typeUrlPrefix?: string): string;
         }

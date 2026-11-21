@@ -9,6 +9,7 @@ import type {
 	MessageRelayOptions,
 	MiscMessageGenerationOptions,
 	SocketConfig,
+	WAMediaUpload,
 	WAMessage,
 	WAMessageKey
 } from '../Types'
@@ -29,12 +30,16 @@ import {
 	generateMessageIDV2,
 	generateParticipantHashV2,
 	generateWAMessage,
+	getKeyAuthor,
 	getStatusCodeForMediaRetry,
 	getUrlFromDirectPath,
 	getWAUploadToServer,
+	encryptPollVote,
+	isViewOnceMessage,
 	MessageRetryManager,
 	normalizeMessageContent,
 	parseAndInjectE2ESessions,
+	sha256,
 	unixTimestampSeconds
 } from '../Utils'
 import { getUrlInfo } from '../Utils/link-preview'
@@ -1114,6 +1119,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				;(stanza.content as BinaryNode[]).push(...additionalNodes)
 			}
 
+			if (isViewOnceMessage(message)) {
+				;(stanza.content as BinaryNode[]).push({ tag: 'meta', attrs: { view_once: 'true' } })
+			}
+
 			logger.debug({ msgId }, `sending message to ${participants.length} devices`)
 
 			await sendNode(stanza)
@@ -1185,7 +1194,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			normalizedMessage.pollCreationMessage ||
 			normalizedMessage.pollCreationMessageV2 ||
 			normalizedMessage.pollCreationMessageV3 ||
-			normalizedMessage.pollUpdateMessage
+			normalizedMessage.pollUpdateMessage ||
+			normalizedMessage.pollAddOptionMessage
 		) {
 			return 'poll'
 		}
@@ -1391,6 +1401,87 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			ev.emit('messages.update', [{ key: message.key, update: { message: message.message } }])
 
 			return message
+		},
+		/**
+		 * Send a sticker as a reply to a message. WhatsApp's native reaction
+		 * payload only accepts text, so this is a quoted sticker reply rather
+		 * than a sticker displayed in the native reaction row.
+		 */
+		sendStickerReaction(
+			jid: string,
+			target: WAMessage,
+			sticker: WAMediaUpload,
+			options: MiscMessageGenerationOptions = {}
+		) {
+			if (target.key.remoteJid && target.key.remoteJid !== jid) {
+				throw new Boom(`cannot send a sticker reaction in ${jid} for a message from ${target.key.remoteJid}`, {
+					statusCode: 400
+				})
+			}
+
+			return this.sendMessage(jid, { sticker }, { ...options, quoted: target })
+		},
+		sendPersonalStatus(content: AnyMessageContent, options: MiscMessageGenerationOptions = {}) {
+			return this.sendMessage('status@broadcast', content, options)
+		},
+		async pinMessage(jid: string, key: WAMessageKey, duration: 86400 | 604800 | 2592000 = 86400) {
+			if (key.remoteJid && key.remoteJid !== jid) {
+				throw new Boom(`refusing to pin message ${key.id}: it belongs to ${key.remoteJid}, not ${jid}`, {
+					statusCode: 400
+				})
+			}
+
+			const found =
+				typeof config.getMessage === 'function' ? await config.getMessage({ ...key, remoteJid: jid }) : undefined
+			if (!found) {
+				throw new Boom(`refusing to pin message ${key.id} in ${jid}: message not found in this chat`, {
+					statusCode: 404
+				})
+			}
+
+			return this.sendMessage(jid, {
+				pin: key,
+				type: proto.PinInChat.Type.PIN_FOR_ALL,
+				time: duration
+			})
+		},
+		unpinMessage(jid: string, key: WAMessageKey) {
+			return this.sendMessage(jid, { pin: key, type: proto.PinInChat.Type.UNPIN_FOR_ALL })
+		},
+		sendPollVote(
+			jid: string,
+			pollCreationMessageKey: WAMessageKey,
+			options: string | string[],
+			pollInfo: { messageSecret: Uint8Array; creatorJid?: string }
+		) {
+			const pollMsgId = pollCreationMessageKey.id
+			if (!pollMsgId) {
+				throw new Boom('pollCreationMessageKey needs an id', { statusCode: 400 })
+			}
+
+			const optionNames = Array.isArray(options) ? options : [options]
+			if (!optionNames.length || optionNames.some(name => !name)) {
+				throw new Boom('sendPollVote needs at least one non-empty option', { statusCode: 400 })
+			}
+
+			const voterJid = jidNormalizedUser(assertMeId(authState.creds))
+			const vote = encryptPollVote(
+				{ selectedOptions: optionNames.map(name => sha256(Buffer.from(name))) },
+				{
+					pollCreatorJid: pollInfo.creatorJid || getKeyAuthor(pollCreationMessageKey, voterJid),
+					pollMsgId,
+					pollEncKey: pollInfo.messageSecret,
+					voterJid
+				}
+			)
+
+			return this.sendMessage(jid, {
+				pollUpdateMessage: {
+					pollCreationMessageKey,
+					vote,
+					senderTimestampMs: Date.now()
+				}
+			})
 		},
 		sendMessage: async (jid: string, content: AnyMessageContent, options: MiscMessageGenerationOptions = {}) => {
 			const userJid = authState.creds.me!.id

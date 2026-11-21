@@ -1517,6 +1517,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		getBusinessProfile,
 		resyncAppState,
 		chatModify,
+		pinChat: (jid: string, pin = true) => chatModify({ pin }, jid),
 		cleanDirtyBits,
 		addOrEditContact,
 		removeContact,
