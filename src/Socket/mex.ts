@@ -26,6 +26,50 @@ const wMexQuery = (
 	})
 }
 
+/**
+ * WhatsApp occasionally returns the w:mex <result> body with a stray byte-order
+ * mark, a NUL or another invisible control character. A bare JSON.parse then
+ * throws
+ *
+ *   Unexpected token '', ", ":12036340"... is not valid JSON
+ *
+ * where the offending token looks empty on screen. Retry against a cleaned copy
+ * before giving up, and when we do give up, surface the raw payload (text + hex)
+ * so the caller can report the real reason instead of a parser error.
+ */
+const STRIP_INVISIBLE_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u200B-\u200D\uFEFF]/g
+
+const tryJSON = (text: string): { ok: true; data: any } | { ok: false } => {
+	try {
+		return { ok: true, data: JSON.parse(text) }
+	} catch {
+		return { ok: false }
+	}
+}
+
+export const parseWMexContent = (raw: string) => {
+	const strict = tryJSON(raw)
+	if (strict.ok) return strict.data
+
+	// 1. invisible bytes (BOM, NUL, zero-width, C0 controls) removed
+	const cleaned = raw.replace(STRIP_INVISIBLE_RE, '')
+	const stripped = tryJSON(cleaned)
+	if (stripped.ok) return stripped.data
+
+	// 2. keep only the outermost JSON region, then retry
+	const first = cleaned.search(/[{[]/)
+	const last = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'))
+	if (first !== -1 && last > first) {
+		const region = tryJSON(cleaned.slice(first, last + 1))
+		if (region.ok) return region.data
+	}
+
+	throw new Boom(
+		`w:mex non-JSON payload (${Buffer.byteLength(raw, 'utf8')} bytes, hex ${Buffer.from(raw, 'utf8').subarray(0, 48).toString('hex')}): ${raw.slice(0, 200)}`,
+		{ statusCode: 400 }
+	)
+}
+
 export const executeWMexQuery = async <T>(
 	variables: Record<string, unknown>,
 	queryId: string,
@@ -36,7 +80,7 @@ export const executeWMexQuery = async <T>(
 	const result = await wMexQuery(variables, queryId, query, generateMessageTag)
 	const child = getBinaryNodeChild(result, 'result')
 	if (child?.content) {
-		const data = JSON.parse(child.content.toString())
+		const data = parseWMexContent(child.content.toString())
 
 		if (data.errors && data.errors.length > 0) {
 			const errorMessages = data.errors.map((err: Error) => err.message || 'Unknown error').join(', ')
