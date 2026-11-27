@@ -105,11 +105,12 @@ const reportBinaryAck = (dataPath: string, raw: string) => {
 		// diagnostics must never break the caller
 	}
 
-	if (!reportedBinaryAcks.has(dataPath)) {
+	// Silent by default: a successful join is not news. Set JUNE_WMEX_ACK_LOG=1
+	// to see the ack on the console (the raw bytes are always kept on disk).
+	const noisy = /^(1|true|yes|on)$/i.test(String(process.env.JUNE_WMEX_ACK_LOG || ''))
+	if (noisy && !reportedBinaryAcks.has(dataPath)) {
 		reportedBinaryAcks.add(dataPath)
-		console.warn(
-			`[ w:mex ] ${dataPath} answered with a binary ack - treating as accepted (raw bytes in w-mex-report.txt)`
-		)
+		console.warn(`[ w:mex ] ${dataPath} answered with a binary ack - treating as accepted`)
 	}
 }
 
