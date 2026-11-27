@@ -1,4 +1,4 @@
-import { parseWMexContent } from '../../Socket/mex.js'
+import { executeWMexQuery, parseWMexContent } from '../../Socket/mex.js'
 
 const JOIN_RESULT = '{"data":{"xwa2_newsletter_join_v2":{"id":"120363405182019728@newsletter"}}}'
 
@@ -49,5 +49,64 @@ describe('parseWMexContent', () => {
 		expect(thrown.output.statusCode).toBe(400)
 		expect(thrown.message).toContain('w:mex non-JSON payload')
 		expect(thrown.message).toContain('hex')
+	})
+})
+
+describe('executeWMexQuery - newsletter binary ack', () => {
+	// the exact shape WhatsApp sends on 2026-11: 0x04 + ":<jid>" + NUL padding
+	const BINARY_ACK = '\u0004:120363405182019728@newsletter' + '\u0000'.repeat(14)
+
+	const iqWith = (content: Buffer) =>
+		({ tag: 'iq', attrs: {}, content: [{ tag: 'result', attrs: {}, content }] } as any)
+	const tag = () => 'TEST_TAG'
+
+	it('accepts a binary ack on newsletter join instead of failing', async () => {
+		const result = await executeWMexQuery(
+			{ newsletter_id: '120363405182019728@newsletter' },
+			'24404358912487870',
+			'xwa2_newsletter_join_v2',
+			async () => iqWith(Buffer.from(BINARY_ACK, 'utf8')),
+			tag
+		)
+		expect(result).toEqual({})
+	})
+
+	it('accepts a binary ack on newsletter leave too', async () => {
+		const result = await executeWMexQuery(
+			{ newsletter_id: '120363405182019728@newsletter' },
+			'9767147403369991',
+			'xwa2_newsletter_leave_v2',
+			async () => iqWith(Buffer.from(BINARY_ACK, 'utf8')),
+			tag
+		)
+		expect(result).toEqual({})
+	})
+
+	it('still throws for a binary body on any other mex query', async () => {
+		let thrown: any
+		try {
+			await executeWMexQuery(
+				{},
+				'999',
+				'xwa2_newsletter_metadata',
+				async () => iqWith(Buffer.from(BINARY_ACK, 'utf8')),
+				tag
+			)
+		} catch (error) {
+			thrown = error
+		}
+		expect(thrown?.isBoom).toBe(true)
+		expect(thrown.message).toContain('w:mex non-JSON payload')
+	})
+
+	it('leaves JSON responses on the join path untouched', async () => {
+		const result = await executeWMexQuery<{ id: string }>(
+			{ newsletter_id: 'x' },
+			'24404358912487870',
+			'xwa2_newsletter_join_v2',
+			async () => iqWith(Buffer.from(JOIN_RESULT, 'utf8')),
+			tag
+		)
+		expect(result.id).toBe('120363405182019728@newsletter')
 	})
 })

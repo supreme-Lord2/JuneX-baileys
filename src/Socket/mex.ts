@@ -1,3 +1,5 @@
+import nodeFs from 'node:fs'
+import nodePath from 'node:path'
 import { Boom } from '@hapi/boom'
 import type { BinaryNode } from '../WABinary'
 import { getBinaryNodeChild, S_WHATSAPP_NET } from '../WABinary'
@@ -70,6 +72,47 @@ export const parseWMexContent = (raw: string) => {
 	)
 }
 
+/**
+ * WhatsApp answers some newsletter joins with a short BINARY acknowledgement
+ * instead of the JSON GraphQL body. Observed shape (45 bytes):
+ *
+ *   04 3a 31 32 ...  "\u0004:120363405182019728@newsletter" + NUL padding
+ *
+ * The join itself succeeds - only the body shape differs, so a JSON-only reader
+ * reports a failure that never happened. Accept it for join/leave and keep the
+ * raw bytes on disk so the shape can be inspected after the fact.
+ */
+const BINARY_ACK_RE = /xwa2_newsletter_(join|leave)_v2/
+
+const reportedBinaryAcks = new Set<string>()
+
+const reportBinaryAck = (dataPath: string, raw: string) => {
+	try {
+		const file = nodePath.join(process.env.JUNE_ROOT || process.cwd(), 'w-mex-report.txt')
+		const bytes = Buffer.from(raw, 'utf8')
+		nodeFs.appendFileSync(
+			file,
+			[
+				`[${new Date().toISOString()}] binary-ack ${dataPath}`,
+				`  bytes: ${bytes.length}`,
+				`  hex  : ${bytes.toString('hex')}`,
+				`  utf8 : ${JSON.stringify(bytes.toString('utf8'))}`,
+				''
+			].join('\n')
+		)
+		if (nodeFs.statSync(file).size > 256 * 1024) nodeFs.writeFileSync(file, '')
+	} catch {
+		// diagnostics must never break the caller
+	}
+
+	if (!reportedBinaryAcks.has(dataPath)) {
+		reportedBinaryAcks.add(dataPath)
+		console.warn(
+			`[ w:mex ] ${dataPath} answered with a binary ack - treating as accepted (raw bytes in w-mex-report.txt)`
+		)
+	}
+}
+
 export const executeWMexQuery = async <T>(
 	variables: Record<string, unknown>,
 	queryId: string,
@@ -80,7 +123,16 @@ export const executeWMexQuery = async <T>(
 	const result = await wMexQuery(variables, queryId, query, generateMessageTag)
 	const child = getBinaryNodeChild(result, 'result')
 	if (child?.content) {
-		const data = parseWMexContent(child.content.toString())
+		let data: any
+		try {
+			data = parseWMexContent(child.content.toString())
+		} catch (error) {
+			if (BINARY_ACK_RE.test(dataPath || '')) {
+				reportBinaryAck(dataPath, child.content.toString())
+				return {} as T
+			}
+			throw error
+		}
 
 		if (data.errors && data.errors.length > 0) {
 			const errorMessages = data.errors.map((err: Error) => err.message || 'Unknown error').join(', ')
