@@ -109,7 +109,7 @@ describe('generateWAMessageContent view once', () => {
 
 	it('wraps a voice note in the V2 extension with the inner viewOnce flag', async () => {
 		const m = await generateWAMessageContent(
-			{ audio: tinyWav(), ptt: true, seconds: 1, waveform: Buffer.from([0, 1, 2]), viewOnceV2Extension: true },
+			{ audio: tinyWav(), ptt: true, seconds: 1, viewOnceV2Extension: true },
 			OPTS
 		)
 		expect(m.viewOnceMessageV2Extension?.message?.audioMessage?.viewOnce).toBe(true)

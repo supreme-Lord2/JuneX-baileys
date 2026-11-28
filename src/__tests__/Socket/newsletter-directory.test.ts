@@ -40,7 +40,8 @@ const mockDeps = (handler: (node: BinaryNode) => BinaryNode): NewsletterDirector
 	generateMessageTag: () => 'test-tag'
 })
 
-const sentQuery = (node: BinaryNode) => {
+const sentQuery = (node: BinaryNode | undefined) => {
+	if (!node) throw new Error('Expected the directory query to be sent')
 	const queryNode = (node.content as BinaryNode[])[0]!
 	const variables = JSON.parse((queryNode.content as Buffer).toString()).variables as Record<string, unknown>
 	return { queryNode, queryId: queryNode.attrs.query_id as string, variables, node }
